@@ -191,9 +191,10 @@ class Config:
     MIN_CELL_VOLTAGE = get_env_value("MIN_CELL_VOLTAGE", 2.500, float)
     MAX_CELL_VOLTAGE = get_env_value("MAX_CELL_VOLTAGE", 3.650, float)
     NUMBER_OF_PACKS = get_env_value("NUMBER_OF_PACKS", 1, int)
+    force_baud_str = get_env_value("FORCE_BAUDRATE", "0")
 
     # Serial Configuration
-    SERIAL_INTERFACE = get_env_value("SERIAL_INTERFACE", "/tmp/vcom0", str)
+    SERIAL_INTERFACE = get_env_value("SERIAL_INTERFACE", "/dev/ttyUSB1", str)
 
     # MQTT Configuration
     MQTT_HOST = get_env_value("MQTT_HOST", "192.168.1.100", str)
@@ -1114,11 +1115,18 @@ def initialize_mqtt() -> mqtt.Client:
 
 def initialize_serial() -> serial.Serial:
     """Initialize serial connection."""
-    try:
-        forced_baud = config.get('baudrate', 0)  # assuming config loaded as dict
-        if forced_baud > 0: baudrate = forced_baud
-        elif number_of_packs > 1: baudrate = 9600
-        else: baudrate = 19200
+try:
+    force_baud = int(force_baud_str)
+except ValueError:
+    force_baud = 0
+
+if force_baud > 0:
+    baudrate = force_baud
+    print(f"Using forced baudrate: {baudrate}")
+elif number_of_packs > 1:
+    baudrate = 9600
+else:
+    baudrate = 19200
         logger.info(
             "Initializing serial interface %s at %s baud",
             Config.SERIAL_INTERFACE,
