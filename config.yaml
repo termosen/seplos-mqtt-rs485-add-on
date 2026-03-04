@@ -1,4 +1,4 @@
-name: "Seplos MQTT RS485 Add-on"
+ename: "Seplos MQTT RS485 Add-on"
 description: "Read Seplos V2/V16 BMS data via RS485 and publish it to HA via MQTT"
 version: "1.0.0-beta4"
 slug: "seplos_mqtt_rs485_add-on"
@@ -46,8 +46,8 @@ schema:
   ha_discovery_prefix: "str"
   invert_ha_dis_charge_measurements: "bool"
   logging_level: "list(info|error|debug)"
-baudrate:
-  name: Baudrate
+force_baudrate:
+  name: Force Baudrate
   description: Force serial baudrate (e.g. 19200 for RS485 master connection)
   required: false
   type: integer
