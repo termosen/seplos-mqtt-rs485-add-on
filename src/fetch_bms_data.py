@@ -202,7 +202,24 @@ class Config:
     MQTT_USERNAME = get_env_value("MQTT_USERNAME", "seplos-mqtt", str)
     MQTT_PASSWORD = get_env_value("MQTT_PASSWORD", "", str)
     MQTT_TOPIC = get_env_value("MQTT_TOPIC", "seplos", str)
-    MQTT_UPDATE_INTERVAL = get_env_value("MQTT_UPDATE_INTERVAL", 0, int)
+    # === Dynamic / Fixed Update Interval Configuration ===
+    update_mode = os.getenv("UPDATE_MODE", "fixed").lower()
+    fixed_interval = int(os.getenv("MQTT_UPDATE_INTERVAL", "10"))
+    active_interval = int(os.getenv("ACTIVE_INTERVAL", "10"))
+    idle_interval = int(os.getenv("IDLE_INTERVAL", "300"))
+    active_threshold = int(os.getenv("ACTIVE_POWER_THRESHOLD", "50"))
+    
+    current_interval = fixed_interval if update_mode == "fixed" else active_interval
+    
+    def publish_current_interval(interval):
+        """Publish the currently used polling interval to MQTT"""
+        try:
+            client.publish("seplos/bms/current_update_interval", str(interval), retain=True, qos=1)
+            print(f"→ Current polling interval: {interval}s  (mode: {update_mode})")
+        except Exception as e:
+            print(f"Warning: Could not publish current interval: {e}")
+    
+    publish_current_interval(current_interval)
 
     # Home Assistant Discovery
     ENABLE_HA_DISCOVERY_CONFIG = get_env_value("ENABLE_HA_DISCOVERY_CONFIG", True, bool)
@@ -1179,68 +1196,83 @@ def main():
 
         # Main loop
         pack_index = 0
-        while True:
-            try:
-                current_pack = app_state.battery_packs[pack_index]
-                pack_instance = current_pack["pack_instance"]
-                pack_address = current_pack["address"]
+while True:
+    try:
+        current_pack = app_state.battery_packs[pack_index]
+        pack_instance = current_pack["pack_instance"]
+        pack_address = current_pack["address"]
 
-                # Fetch battery pack data
-                pack_data, poll_success = pack_instance.read_serial_data()
-                now = time.time()
+        # Fetch battery pack data
+        pack_data, poll_success = pack_instance.read_serial_data()
+        now = time.time()
 
-                if poll_success:
-                    last_bms_update_ts = now
-                    current_pack["last_success_ts"] = now
-                    current_pack["publish_counter"] += 1
-                    heartbeat_payload = {
-                        "last_publish": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                        "publish_counter": current_pack["publish_counter"],
-                    }
-                    app_state.mqtt_client.publish(
-                        _pack_heartbeat_topic(pack_address),
-                        json.dumps(heartbeat_payload),
-                        retain=False,
-                    )
-                    app_state.mqtt_client.publish(
-                        _pack_availability_topic(pack_address),
-                        "online",
-                        retain=False,
-                    )
-                    current_pack["availability"] = "online"
+        if poll_success:
+            last_bms_update_ts = now
+            current_pack["last_success_ts"] = now
+            current_pack["publish_counter"] += 1
 
-                if pack_data:
-                    # Publish updated data to MQTT
-                    logger.info("Pack%s:Publishing updated data to MQTT", pack_address)
-                    topic = f"{Config.MQTT_TOPIC}/pack-{pack_address}/sensors"
-                    payload = {**pack_data}
-                    app_state.mqtt_client.publish(topic, json.dumps(payload, indent=2))
-                elif poll_success:
-                    logger.info("Pack%s:No changes detected", pack_address)
+            heartbeat_payload = {
+                "last_publish": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                "publish_counter": current_pack["publish_counter"],
+            }
+            app_state.mqtt_client.publish(
+                _pack_heartbeat_topic(pack_address),
+                json.dumps(heartbeat_payload),
+                retain=False,
+            )
+            app_state.mqtt_client.publish(
+                _pack_availability_topic(pack_address),
+                "online",
+                retain=False,
+            )
+            current_pack["availability"] = "online"
 
-                for pack_state in app_state.battery_packs:
-                    _publish_pack_availability(pack_state, now)
+        if pack_data:
+            logger.info("Pack%s: Publishing updated data to MQTT", pack_address)
+            topic = f"{Config.MQTT_TOPIC}/pack-{pack_address}/sensors"
+            payload = {**pack_data}
+            app_state.mqtt_client.publish(topic, json.dumps(payload, indent=2))
+        elif poll_success:
+            logger.info("Pack%s: No changes detected", pack_address)
 
-                # Publish availability
-                app_state.mqtt_client.publish(f"{Config.MQTT_TOPIC}/availability", "online", retain=False)
+        for pack_state in app_state.battery_packs:
+            _publish_pack_availability(pack_state, now)
 
-                # Mandatory delay between each request or there will be corrupt data
-                time.sleep(1)
+        # Publish overall availability
+        app_state.mqtt_client.publish(f"{Config.MQTT_TOPIC}/availability", "online", retain=False)
 
-                # Move to next pack
-                pack_index += 1
-                if pack_index >= len(app_state.battery_packs):
-                    pack_index = 0
-                    if Config.MQTT_UPDATE_INTERVAL > 0:
-                        logger.info(
-                            "Waiting %s seconds before next cycle",
-                            Config.MQTT_UPDATE_INTERVAL
-                        )
-                        time.sleep(Config.MQTT_UPDATE_INTERVAL)
+        # === NEW DYNAMIC INTERVAL LOGIC ===
+        # Determine if the battery system is active (using total power from any pack)
+        dis_charge_power = 0.0
+        for p in app_state.battery_packs:
+            if "dis_charge_power" in p.get("data", {}):
+                dis_charge_power += abs(float(p["data"].get("dis_charge_power", 0)))
 
-            except Exception as e:
-                logger.error("Error in main loop: %s", e)
-                time.sleep(10)
+        if update_mode == "dynamic":
+            new_interval = active_interval if dis_charge_power > active_threshold else idle_interval
+            if new_interval != current_interval:
+                current_interval = new_interval
+                publish_current_interval(current_interval)
+                logger.info(f"Interval changed to {current_interval}s (Total Power: {dis_charge_power:.0f}W)")
+
+        # Mandatory delay between each pack request (keep this to avoid corrupt data)
+        time.sleep(1)
+
+        # Move to next pack
+        pack_index += 1
+        if pack_index >= len(app_state.battery_packs):
+            pack_index = 0
+            # Outer cycle delay - now dynamic or fixed
+            logger.info(
+                "Waiting %s seconds before next full cycle (mode: %s)",
+                current_interval,
+                update_mode
+            )
+            time.sleep(current_interval)
+
+    except Exception as e:
+        logger.error("Error in main loop: %s", e)
+        time.sleep(10)
 
     except KeyboardInterrupt:
         logger.info("Shutdown requested via keyboard interrupt")
