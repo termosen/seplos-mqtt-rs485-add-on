@@ -40,7 +40,6 @@ schema:
   min_cell_voltage: "float"
   max_cell_voltage: "float"
   mqtt_topic: "str"
-  mqtt_update_interval: "int"
   enable_ha_discovery: "bool"
   ha_discovery_prefix: "str"
   invert_ha_dis_charge_measurements: "bool"
