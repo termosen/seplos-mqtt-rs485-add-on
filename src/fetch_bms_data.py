@@ -202,7 +202,19 @@ class Config:
     MQTT_USERNAME = get_env_value("MQTT_USERNAME", "seplos-mqtt", str)
     MQTT_PASSWORD = get_env_value("MQTT_PASSWORD", "", str)
     MQTT_TOPIC = get_env_value("MQTT_TOPIC", "seplos", str)
-    MQTT_UPDATE_INTERVAL = get_env_value("MQTT_UPDATE_INTERVAL", 0, int)
+
+    ACTIVE_POLL_INTERVAL = 2      # Seconds between full cycles when ACTIVE
+    IDLE_POLL_INTERVAL = 10       # Seconds between full cycles when IDLE (checking if it woke up)
+    HEARTBEAT_INTERVAL_IDLE = 300 # Seconds between forced MQTT updates when IDLE (5 mins)
+    IDLE_CURRENT_THRESHOLD = 0.5  # Amps (positive or negative) to consider the battery "Active"
+
+    # Keep track of when we last published the full sensor payload for each pack
+    last_full_publish_ts = {pack["address"]: 0 for pack in app_state.battery_packs}
+    
+    # Track the overall system state to determine how long to sleep at the end of the cycle
+    system_is_active = False
+    
+    # MQTT_UPDATE_INTERVAL = get_env_value("MQTT_UPDATE_INTERVAL", 0, int) Old logic
 
     # Home Assistant Discovery
     ENABLE_HA_DISCOVERY_CONFIG = get_env_value("ENABLE_HA_DISCOVERY_CONFIG", True, bool)
@@ -1184,15 +1196,34 @@ def main():
                 current_pack = app_state.battery_packs[pack_index]
                 pack_instance = current_pack["pack_instance"]
                 pack_address = current_pack["address"]
-
+    
                 # Fetch battery pack data
                 pack_data, poll_success = pack_instance.read_serial_data()
                 now = time.time()
-
+    
+                # --- SMART PUBLISH LOGIC ---
+                is_pack_active = False
+                force_heartbeat = False
+    
+                if pack_data:
+                    # Check the current to see if the pack is active
+                    pack_current = abs(float(pack_data.get("dis_charge_current", 0.0)))
+                    is_pack_active = pack_current > IDLE_CURRENT_THRESHOLD
+                    
+                    # Update overall system state
+                    if is_pack_active:
+                        system_is_active = True
+    
+                    # Check if it's time for a mandatory heartbeat publish while idle
+                    time_since_last_publish = now - last_full_publish_ts.get(pack_address, 0)
+                    force_heartbeat = time_since_last_publish >= HEARTBEAT_INTERVAL_IDLE
+    
                 if poll_success:
                     last_bms_update_ts = now
                     current_pack["last_success_ts"] = now
                     current_pack["publish_counter"] += 1
+                    
+                    # We always publish the tiny heartbeat/availability payload to keep HA happy
                     heartbeat_payload = {
                         "last_publish": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                         "publish_counter": current_pack["publish_counter"],
@@ -1208,39 +1239,52 @@ def main():
                         retain=False,
                     )
                     current_pack["availability"] = "online"
-
-                if pack_data:
-                    # Publish updated data to MQTT
-                    logger.info("Pack%s:Publishing updated data to MQTT", pack_address)
+    
+                if pack_data and (is_pack_active or force_heartbeat):
+                    # Publish the HEAVY sensor data to MQTT only if active or forced
+                    logger.info("Pack%s: Publishing updated data to MQTT (Active: %s, Heartbeat: %s)", 
+                                pack_address, is_pack_active, force_heartbeat)
+                    
                     topic = f"{Config.MQTT_TOPIC}/pack-{pack_address}/sensors"
                     payload = {**pack_data}
                     app_state.mqtt_client.publish(topic, json.dumps(payload, indent=2))
+                    
+                    # Reset the publish timer for this pack
+                    last_full_publish_ts[pack_address] = now
+    
+                elif pack_data and not is_pack_active and not force_heartbeat:
+                    logger.debug("Pack%s: Idle (Current: %sA). Skipping full MQTT publish.", pack_address, pack_data.get("current", 0.0))
+                
                 elif poll_success:
-                    logger.info("Pack%s:No changes detected", pack_address)
-
+                    logger.info("Pack%s: No changes detected", pack_address)
+    
                 for pack_state in app_state.battery_packs:
                     _publish_pack_availability(pack_state, now)
-
+    
                 # Publish availability
                 app_state.mqtt_client.publish(f"{Config.MQTT_TOPIC}/availability", "online", retain=False)
-
+    
                 # Mandatory delay between each request or there will be corrupt data
                 time.sleep(1)
-
+    
                 # Move to next pack
                 pack_index += 1
                 if pack_index >= len(app_state.battery_packs):
                     pack_index = 0
-                    if Config.MQTT_UPDATE_INTERVAL > 0:
-                        logger.info(
-                            "Waiting %s seconds before next cycle",
-                            Config.MQTT_UPDATE_INTERVAL
-                        )
-                        time.sleep(Config.MQTT_UPDATE_INTERVAL)
-
+                    
+                    # Determine dynamic sleep interval based on system activity
+                    sleep_interval = ACTIVE_POLL_INTERVAL if system_is_active else IDLE_POLL_INTERVAL
+                    
+                    # Reset system state for the next cycle
+                    system_is_active = False 
+                    
+                    if sleep_interval > 0:
+                        logger.info("Waiting %s seconds before next cycle (Dynamic Poll)", sleep_interval)
+                        time.sleep(sleep_interval)
+    
             except Exception as e:
-                logger.error("Error in main loop: %s", e)
-                time.sleep(10)
+                logger.error("Exception in main loop: %s", e)
+                time.sleep(5) # Prevent tight error loops
 
     except KeyboardInterrupt:
         logger.info("Shutdown requested via keyboard interrupt")
