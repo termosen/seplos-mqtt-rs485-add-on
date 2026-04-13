@@ -30,10 +30,6 @@ configuration:
     name: "MQTT Topic"
     description: "Base MQTT topic for publishing battery data"
   
-  mqtt_update_interval:
-    name: "MQTT Update Interval"
-    description: "Seconds between MQTT updates (0 = continuous updates)"
-  
   # Home Assistant Integration
   enable_ha_discovery:
     name: "Enable HA Auto-Discovery"
