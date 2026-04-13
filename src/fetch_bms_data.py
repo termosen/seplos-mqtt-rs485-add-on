@@ -202,19 +202,7 @@ class Config:
     MQTT_USERNAME = get_env_value("MQTT_USERNAME", "seplos-mqtt", str)
     MQTT_PASSWORD = get_env_value("MQTT_PASSWORD", "", str)
     MQTT_TOPIC = get_env_value("MQTT_TOPIC", "seplos", str)
-
-    ACTIVE_POLL_INTERVAL = 2      # Seconds between full cycles when ACTIVE
-    IDLE_POLL_INTERVAL = 10       # Seconds between full cycles when IDLE (checking if it woke up)
-    HEARTBEAT_INTERVAL_IDLE = 300 # Seconds between forced MQTT updates when IDLE (5 mins)
-    IDLE_CURRENT_THRESHOLD = 0.5  # Amps (positive or negative) to consider the battery "Active"
-
-    # Keep track of when we last published the full sensor payload for each pack
-    last_full_publish_ts = {pack["address"]: 0 for pack in app_state.battery_packs}
-    
-    # Track the overall system state to determine how long to sleep at the end of the cycle
-    system_is_active = False
-    
-    # MQTT_UPDATE_INTERVAL = get_env_value("MQTT_UPDATE_INTERVAL", 0, int) Old logic
+    MQTT_UPDATE_INTERVAL = get_env_value("MQTT_UPDATE_INTERVAL", 0, int) Old logic
 
     # Home Assistant Discovery
     ENABLE_HA_DISCOVERY_CONFIG = get_env_value("ENABLE_HA_DISCOVERY_CONFIG", True, bool)
@@ -1189,6 +1177,18 @@ def main():
                 auto_discovery.create_autodiscovery_sensors(pack_no=pack['address'])
             logger.info("Auto-Discovery configurations sent")
 
+        # --- CONFIGURATION FOR SMART PUBLISHING ---        
+        ACTIVE_POLL_INTERVAL = 2      # Seconds between full cycles when ACTIVE
+        IDLE_POLL_INTERVAL = 10       # Seconds between full cycles when IDLE (checking if it woke up)
+        HEARTBEAT_INTERVAL_IDLE = 300 # Seconds between forced MQTT updates when IDLE (5 mins)
+        IDLE_CURRENT_THRESHOLD = 0.5  # Amps (positive or negative) to consider the battery "Active"
+    
+        # Keep track of when we last published the full sensor payload for each pack
+        last_full_publish_ts = {pack["address"]: 0 for pack in app_state.battery_packs}
+        
+        # Track the overall system state to determine how long to sleep at the end of the cycle
+        system_is_active = False
+        
         # Main loop
         pack_index = 0
         while True:
