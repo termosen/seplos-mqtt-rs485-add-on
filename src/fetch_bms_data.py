@@ -1187,7 +1187,7 @@ def main():
         # Track the overall system state to determine how long to sleep at the end of the cycle
         system_is_active = False
         
-        # Main loop
+# Main loop
         pack_index = 0
         while True:
             try:
@@ -1204,8 +1204,10 @@ def main():
                 force_heartbeat = False
     
                 if pack_data:
-                    # Check the current to see if the pack is active
-                    pack_current = abs(float(pack_data.get("dis_charge_current", 0.0)))
+                    # THE FIX: Dig into the nested dictionary to find the current!
+                    telemetry_normal = pack_data.get("telemetry", {}).get("normal", {})
+                    pack_current = abs(float(telemetry_normal.get("dis_charge_current", 0.0)))
+                    
                     is_pack_active = pack_current > IDLE_CURRENT_THRESHOLD
                     
                     # Update overall system state
@@ -1251,7 +1253,8 @@ def main():
                     last_full_publish_ts[pack_address] = now
     
                 elif pack_data and not is_pack_active and not force_heartbeat:
-                    logger.debug("Pack%s: Idle (Current: %sA). Skipping full MQTT publish.", pack_address, pack_data.get("current", 0.0))
+                    # FIX: Also updated the debug log to print the actual current variable
+                    logger.debug("Pack%s: Idle (Current: %sA). Skipping full MQTT publish.", pack_address, pack_current)
                 
                 elif poll_success:
                     logger.info("Pack%s: No changes detected", pack_address)
