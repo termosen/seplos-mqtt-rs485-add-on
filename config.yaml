@@ -28,51 +28,7 @@ options:
   min_cell_voltage: 2.5
   max_cell_voltage: 3.65
   mqtt_topic: "seplos"
-  update_mode:
-    name: Update Mode
-    description: "fixed = use single interval | dynamic = switch between active/idle based on battery power"
-    required: false
-    type: list
-    default: "fixed"
-    options:
-      - "fixed"
-      - "dynamic"
-
-  mqtt_update_interval:   # used when mode = fixed
-    name: Fixed Update Interval (seconds)
-    description: Polling interval when update_mode = fixed
-    required: false
-    type: integer
-    default: 10
-    min: 5
-    max: 900
-
-  active_interval:        # used when mode = dynamic
-    name: Active Interval (seconds)
-    description: Fast polling when battery is charging or discharging
-    required: false
-    type: integer
-    default: 10
-    min: 5
-    max: 300
-
-  idle_interval:          # used when mode = dynamic
-    name: Idle Interval (seconds)
-    description: Slow polling when battery is idle
-    required: false
-    type: integer
-    default: 300
-    min: 30
-    max: 900
-
-  active_power_threshold: # Watts absolute value
-    name: Active Power Threshold (W)
-    description: If |dis_charge_power| > this value → considered active
-    required: false
-    type: integer
-    default: 50
-    min: 10
-    max: 500
+  mqtt_update_interval: 10
   enable_ha_discovery: false
   ha_discovery_prefix: "homeassistant"
   invert_ha_dis_charge_measurements: false
