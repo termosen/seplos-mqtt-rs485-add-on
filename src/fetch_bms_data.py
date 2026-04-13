@@ -1177,17 +1177,20 @@ def main():
 
         # --- CONFIGURATION FOR SMART PUBLISHING ---        
         ACTIVE_POLL_INTERVAL = 2      # Seconds between full cycles when ACTIVE
-        IDLE_POLL_INTERVAL = 10       # Seconds between full cycles when IDLE (checking if it woke up)
+        IDLE_POLL_INTERVAL = 10       # Seconds between full cycles when IDLE 
         HEARTBEAT_INTERVAL_IDLE = 300 # Seconds between forced MQTT updates when IDLE (5 mins)
-        IDLE_CURRENT_THRESHOLD = 0.5  # Amps (positive or negative) to consider the battery "Active"
+        IDLE_CURRENT_THRESHOLD = 0.5  # Amps to consider the battery "Active"
     
-        # Keep track of when we last published the full sensor payload for each pack
+        # Keep track of when we last published, and what state it was in
         last_full_publish_ts = {pack["address"]: 0 for pack in app_state.battery_packs}
         
-        # Track the overall system state to determine how long to sleep at the end of the cycle
+        # Set to True initially so the very first 0A reading is guaranteed to be published!
+        pack_was_active = {pack["address"]: True for pack in app_state.battery_packs} 
+        
+        # Track the overall system state to determine how long to sleep
         system_is_active = False
         
-# Main loop
+        # Main loop
         pack_index = 0
         while True:
             try:
@@ -1201,14 +1204,17 @@ def main():
     
                 # --- SMART PUBLISH LOGIC ---
                 is_pack_active = False
+                just_became_idle = False
                 force_heartbeat = False
     
                 if pack_data:
-                    # THE FIX: Dig into the nested dictionary to find the current!
                     telemetry_normal = pack_data.get("telemetry", {}).get("normal", {})
                     pack_current = abs(float(telemetry_normal.get("dis_charge_current", 0.0)))
                     
                     is_pack_active = pack_current > IDLE_CURRENT_THRESHOLD
+                    
+                    # THE FIX: Did it just drop to 0? If yes, we MUST publish to tell HA!
+                    just_became_idle = (not is_pack_active) and pack_was_active[pack_address]
                     
                     # Update overall system state
                     if is_pack_active:
@@ -1240,20 +1246,22 @@ def main():
                     )
                     current_pack["availability"] = "online"
     
-                if pack_data and (is_pack_active or force_heartbeat):
-                    # Publish the HEAVY sensor data to MQTT only if active or forced
-                    logger.info("Pack%s: Publishing updated data to MQTT (Active: %s, Heartbeat: %s)", 
-                                pack_address, is_pack_active, force_heartbeat)
+                # Determine if this specific cycle should be pushed to MQTT
+                should_publish = is_pack_active or just_became_idle or force_heartbeat
+    
+                if pack_data and should_publish:
+                    logger.info("Pack%s: Publishing data to MQTT (Active: %s, JustIdle: %s, Heartbeat: %s)", 
+                                pack_address, is_pack_active, just_became_idle, force_heartbeat)
                     
                     topic = f"{Config.MQTT_TOPIC}/pack-{pack_address}/sensors"
                     payload = {**pack_data}
                     app_state.mqtt_client.publish(topic, json.dumps(payload, indent=2))
                     
-                    # Reset the publish timer for this pack
+                    # Update our trackers for the next cycle!
                     last_full_publish_ts[pack_address] = now
+                    pack_was_active[pack_address] = is_pack_active 
     
-                elif pack_data and not is_pack_active and not force_heartbeat:
-                    # FIX: Also updated the debug log to print the actual current variable
+                elif pack_data and not should_publish:
                     logger.debug("Pack%s: Idle (Current: %sA). Skipping full MQTT publish.", pack_address, pack_current)
                 
                 elif poll_success:
