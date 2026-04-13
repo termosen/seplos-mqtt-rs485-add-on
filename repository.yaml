@@ -1,4 +1,4 @@
-name: Seplos MQTT RS485 Add-on
-url: https://github.com/Privatecoder/seplos-mqtt-rs485-add-on
-maintainer: Privatecoder
-description: MQTT bridge for Seplos RS485 BMS communication.
+name: Seplos fork 19200
+url: https://github.com/termosen/seplos_fork_19200
+maintainer: termosen
+description: Hardcoded 19200 baud rate and dynamic read fro BMS and publish to MQTT
