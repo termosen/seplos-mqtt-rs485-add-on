@@ -202,7 +202,7 @@ class Config:
     MQTT_USERNAME = get_env_value("MQTT_USERNAME", "seplos-mqtt", str)
     MQTT_PASSWORD = get_env_value("MQTT_PASSWORD", "", str)
     MQTT_TOPIC = get_env_value("MQTT_TOPIC", "seplos", str)
-    MQTT_UPDATE_INTERVAL = get_env_value("MQTT_UPDATE_INTERVAL", 0, int) Old logic
+    MQTT_UPDATE_INTERVAL = get_env_value("MQTT_UPDATE_INTERVAL", 0, int)
 
     # Home Assistant Discovery
     ENABLE_HA_DISCOVERY_CONFIG = get_env_value("ENABLE_HA_DISCOVERY_CONFIG", True, bool)
