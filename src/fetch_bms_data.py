@@ -73,8 +73,7 @@ def _compute_max_age_seconds() -> int:
     # The main loop sleeps 1s after each pack poll, plus an optional pause after a full cycle.
     packs = len(app_state.battery_packs) or int(getattr(Config, "NUMBER_OF_PACKS", 1) or 1)
     per_pack_delay = 1
-    cycle_pause = int(getattr(Config, "MQTT_UPDATE_INTERVAL", 0) or 0)
-    expected_cycle = packs * per_pack_delay + max(cycle_pause, 0)
+    expected_cycle = packs * per_pack_delay
     # Add a little slack for serial hiccups and startup.
     return max(15, int(expected_cycle * 3 + 5))
 
@@ -202,7 +201,6 @@ class Config:
     MQTT_USERNAME = get_env_value("MQTT_USERNAME", "seplos-mqtt", str)
     MQTT_PASSWORD = get_env_value("MQTT_PASSWORD", "", str)
     MQTT_TOPIC = get_env_value("MQTT_TOPIC", "seplos", str)
-    MQTT_UPDATE_INTERVAL = get_env_value("MQTT_UPDATE_INTERVAL", 0, int)
 
     # Home Assistant Discovery
     ENABLE_HA_DISCOVERY_CONFIG = get_env_value("ENABLE_HA_DISCOVERY_CONFIG", True, bool)
